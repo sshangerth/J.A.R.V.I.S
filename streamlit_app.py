@@ -1,28 +1,31 @@
+import time
 import streamlit as st
 from openai import OpenAI
 
 # Titel und Beschreibung
-st.title("💬 Chatbot mit eigenem Assistant")
+st.title("💬 Chatbot (eigener Assistant)")
 st.write(
     "Dieser Chatbot verwendet deinen eigenen Assistant aus der OpenAI Assistants API."
 )
 
 # API-Key Eingabe
 openai_api_key = st.text_input("OpenAI API Key", type="password")
+
 if not openai_api_key:
     st.info("Bitte gib deinen OpenAI API Key ein, um fortzufahren.", icon="🗝️")
 else:
+    # OpenAI Client
     client = OpenAI(api_key=openai_api_key)
 
-    # Assistant-ID (deine eigene)
+    # Deine Assistant-ID
     ASSISTANT_ID = "asst_u3LOqVkIQNe0KjxToHj8tKoG"
 
-    # Thread-Objekt im Session-State speichern (damit der Chat erhalten bleibt)
+    # Thread speichern (damit Verlauf bleibt)
     if "thread_id" not in st.session_state:
         thread = client.beta.threads.create()
         st.session_state.thread_id = thread.id
 
-    # Chat-Verlauf anzeigen
+    # Bisherige Nachrichten anzeigen
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
@@ -30,27 +33,27 @@ else:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Chat-Eingabe
-    if prompt := st.chat_input("Schreib etwas..."):
-        # Nutzer-Nachricht anzeigen und speichern
+    # Eingabe
+    if prompt := st.chat_input("Was möchtest du fragen?"):
+        # Nachricht speichern & anzeigen
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # Nutzer-Nachricht an Thread anhängen
+        # Nachricht in Thread einfügen
         client.beta.threads.messages.create(
             thread_id=st.session_state.thread_id,
             role="user",
             content=prompt,
         )
 
-        # Assistant-Run starten
+        # Run starten
         run = client.beta.threads.runs.create(
             thread_id=st.session_state.thread_id,
             assistant_id=ASSISTANT_ID,
         )
 
-        # Warten bis Run fertig ist
+        # Auf Antwort warten
         with st.chat_message("assistant"):
             with st.spinner("Denke nach..."):
                 while True:
@@ -60,20 +63,23 @@ else:
                     )
                     if run_status.status == "completed":
                         break
-                    elif run_status.status in ["failed", "cancelled"]:
+                    if run_status.status in ["failed", "cancelled", "expired"]:
                         st.error(f"Run status: {run_status.status}")
-                        break
+                        st.stop()
+                    time.sleep(0.5)
 
-                # Antworten des Assistants abrufen
+                # Antwort abrufen
                 messages = client.beta.threads.messages.list(
                     thread_id=st.session_state.thread_id
                 )
+                last_msg = next((m for m in messages.data if m.role == "assistant"), None)
 
-                # Letzte Antwort finden (vom Assistant)
-                last_msg = next(
-                    (m for m in messages.data if m.role == "assistant"), None
-                )
-                if last_msg:
+                if last_msg and last_msg.content:
                     response = last_msg.content[0].text.value
-                    st.markdown(response)
-                    st.session_state.messages.append({"role": "assistant", "content": response})
+                else:
+                    response = "(keine Antwort erhalten)"
+
+                st.markdown(response)
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": response}
+                )
